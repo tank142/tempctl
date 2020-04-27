@@ -1,0 +1,70 @@
+#! /bin/bash
+source /etc/tempctl.conf
+if [[ ${@} == *stop* ]];then
+	for i in ${CPUs[@]}; do echo ${FREQ[0]} > /sys/devices/system/cpu/cpu$i/cpufreq/scaling_max_freq; done
+	killall tempctl
+fi
+#-- Поиск датчиков --
+I="0"
+for file in /sys/class/hwmon/*
+do
+	name=`cat $file/name`
+	for i in ${SENSORs[@]}; do
+		if [[ "$name" == "${i%:*:*}" ]];then
+			SENSORS[$I]="$file/${i#*:}"
+			SENSORS_TEMP[$I]="${SENSORS[$I]#*:}"
+			SENSORS[$I]="${SENSORS[$I]%:*}"
+			((I++));break
+		fi
+	done
+done
+unset I i file
+LEVEL=0
+LEVEL_MAX=${#FREQ[@]};((LEVEL_MAX--))
+throttling_time_level_up="$THROTTLING_TIME_LEVEL_UP"
+throttling_time_level_down="$THROTTLING_TIME_LEVEL_DOWN"
+for i in ${CPUs[@]}; do echo ${FREQ[0]} > /sys/devices/system/cpu/cpu$i/cpufreq/scaling_max_freq; done
+#--------------------
+TIMERs(){
+	if (( "$throttling_time_level_up" > "0" ));then
+	((throttling_time_level_up--));fi
+	if (( "$throttling_time_level_down" > "0" ));then
+	((throttling_time_level_down--));fi
+}
+LEVEL_UP(){
+	if [[ "$throttling_time_level_up" == "0" && "$LEVEL_MAX" != "$LEVEL" && "$CPU_THROTTLING_LEVEL_MAX" > "$LEVEL" ]];then
+		((LEVEL++))
+		throttling_time_level_up="$THROTTLING_TIME_LEVEL_UP"
+		for i in ${CPUs[@]}; do echo ${FREQ[$LEVEL]} > /sys/devices/system/cpu/cpu$i/cpufreq/scaling_max_freq; done
+	fi
+}
+LEVEL_DOWN(){
+	if [[ "0" != "$LEVEL" && "$throttling_time_level_down" == "0" ]];then
+		((LEVEL--))
+		throttling_time_level_down="$THROTTLING_TIME_LEVEL_DOWN"
+		for i in ${CPUs[@]}; do echo ${FREQ[$LEVEL]} > /sys/devices/system/cpu/cpu$i/cpufreq/scaling_max_freq; done
+	fi
+}
+TEMP(){
+	local X
+	for ((X=0; X < "${#SENSORS_TEMP[@]}"; X++)); do
+		temp="`cat ${SENSORS[$X]}`"
+		if (( "${SENSORS_TEMP[$X]}" <= "$temp" ));then
+			if [[ "$LOG" == "1" ]];then
+				echo "Перегрев: $(( $temp / 1000 ))° ${SENSORs[$X]%:*}"
+			fi
+			return 1
+		fi
+	done
+	return 0
+}
+while true; do
+	TIMERs
+	TEMP
+	if [[ "$?" == "1" ]];then
+		LEVEL_UP
+	else
+		LEVEL_DOWN
+	fi
+	sleep 1
+done
