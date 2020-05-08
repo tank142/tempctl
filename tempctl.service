@@ -4,7 +4,6 @@ Description=Thermal protection
 [Service]
 Type=idle
 ExecStart=/usr/bin/tempctl
-ExecStop=/usr/bin/tempctl stop
 
 [Install]
 WantedBy = multi-user.target
